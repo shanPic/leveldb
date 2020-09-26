@@ -289,18 +289,21 @@ void DBImpl::RemoveObsoleteFiles() {
 Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   mutex_.AssertHeld();
 
+  // 忽略CreateDir的错误，因为DB的创建动作只有在文件描述符被创建的时候才会提交，
+  // 同时，文件夹可能因为之前的创建尝试而已经存在了
   // Ignore error from CreateDir since the creation of the DB is
   // committed only when the descriptor is created, and this directory
   // may already exist from a previous failed creation attempt.
   env_->CreateDir(dbname_);
   assert(db_lock_ == nullptr);
-  Status s = env_->LockFile(LockFileName(dbname_), &db_lock_);
+  Status s = env_->LockFile(LockFileName(dbname_), &db_lock_); //TODO db_lock的作用是什么？猜想：占用文件描述符，防止其他进程打开此文件夹
   if (!s.ok()) {
     return s;
   }
 
   if (!env_->FileExists(CurrentFileName(dbname_))) {
     if (options_.create_if_missing) {
+      // 这里是创建新DB的动作
       s = NewDB();
       if (!s.ok()) {
         return s;
@@ -1475,6 +1478,7 @@ Status DB::Delete(const WriteOptions& opt, const Slice& key) {
 
 DB::~DB() = default;
 
+// DB对外暴露的Open接口
 Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   *dbptr = nullptr;
 
@@ -1482,10 +1486,13 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   impl->mutex_.Lock();
   VersionEdit edit;
   // Recover handles create_if_missing, error_if_exists
-  bool save_manifest = false;
+  bool save_manifest = false; //TODO save_mainfest这个标志是干嘛的
+  // 从日志文件中恢复
   Status s = impl->Recover(&edit, &save_manifest);
+  //TODO 为何还需要判断impl->mem==nullptr?
   if (s.ok() && impl->mem_ == nullptr) {
     // Create new log and a corresponding memtable.
+    // 创建新的log file 以及 对应的memtable （一一对应关系）
     uint64_t new_log_number = impl->versions_->NewFileNumber();
     WritableFile* lfile;
     s = options.env->NewWritableFile(LogFileName(dbname, new_log_number),
@@ -1500,7 +1507,7 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
     }
   }
   if (s.ok() && save_manifest) {
-    edit.SetPrevLogNumber(0);  // No older logs needed after recovery.
+    edit.SetPrevLogNumber(0);  // No older logs needed after recovery. //TODO 为何不再需要？
     edit.SetLogNumber(impl->logfile_number_);
     s = impl->versions_->LogAndApply(&edit, &impl->mutex_);
   }

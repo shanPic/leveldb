@@ -876,6 +876,7 @@ Status VersionSet::Recover(bool* save_manifest) {
   if (current.empty() || current[current.size() - 1] != '\n') {
     return Status::Corruption("CURRENT file does not end with newline");
   }
+  // 去除回车
   current.resize(current.size() - 1);
 
   std::string dscname = dbname_ + "/" + current;
