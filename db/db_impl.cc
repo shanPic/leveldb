@@ -296,6 +296,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   // may already exist from a previous failed creation attempt.
   env_->CreateDir(dbname_);
   assert(db_lock_ == nullptr);
+  //1. dbname_加锁，防止recover过程中出现写操作
   Status s = env_->LockFile(LockFileName(dbname_), &db_lock_); //TODO db_lock的作用是什么？猜想：占用文件描述符，防止其他进程打开此文件夹
   if (!s.ok()) {
     return s;
@@ -319,6 +320,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
     }
   }
 
+  //2. 从mainfest文件中拿到一些元信息，放在verisons_中
   s = versions_->Recover(save_manifest);
   if (!s.ok()) {
     return s;
@@ -332,6 +334,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   // Note that PrevLogNumber() is no longer used, but we pay
   // attention to it in case we are recovering a database
   // produced by an older version of leveldb.
+  //3. 从log文件中读取未持久化到磁盘的数据（只WAL了，未持久化到磁盘），恢复到内存中
   const uint64_t min_log = versions_->LogNumber();
   const uint64_t prev_log = versions_->PrevLogNumber();
   std::vector<std::string> filenames;
@@ -340,6 +343,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
     return s;
   }
   std::set<uint64_t> expected;
+  // 从versions_中获取所有当前的version_中的所有文件的序号
   versions_->AddLiveFiles(&expected);
   uint64_t number;
   FileType type;
@@ -361,6 +365,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   // Recover in the order in which the logs were generated
   std::sort(logs.begin(), logs.end());
   for (size_t i = 0; i < logs.size(); i++) {
+    // 重点操作：从log文件中恢复到内存中
     s = RecoverLogFile(logs[i], (i == logs.size() - 1), save_manifest, edit,
                        &max_sequence);
     if (!s.ok()) {
@@ -439,6 +444,7 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
       mem = new MemTable(internal_comparator_);
       mem->Ref();
     }
+    // 重点操作：将batch中的数据塞入到mem（memtable）中
     status = WriteBatchInternal::InsertInto(&batch, mem);
     MaybeIgnoreError(&status);
     if (!status.ok()) {
@@ -450,6 +456,7 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
       *max_sequence = last_seq;
     }
 
+    // 如果内存占用过大了，则持久化到level0
     if (mem->ApproximateMemoryUsage() > options_.write_buffer_size) {
       compactions++;
       *save_manifest = true;
@@ -1484,6 +1491,7 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
 
   DBImpl* impl = new DBImpl(options, dbname);
   impl->mutex_.Lock();
+  // TODO edit的作用
   VersionEdit edit;
   // Recover handles create_if_missing, error_if_exists
   bool save_manifest = false; //TODO save_mainfest这个标志是干嘛的

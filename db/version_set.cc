@@ -1143,6 +1143,7 @@ uint64_t VersionSet::ApproximateOffsetOf(Version* v, const InternalKey& ikey) {
 }
 
 void VersionSet::AddLiveFiles(std::set<uint64_t>* live) {
+  // dummy_versions_ 为version的双向链表的head
   for (Version* v = dummy_versions_.next_; v != &dummy_versions_;
        v = v->next_) {
     for (int level = 0; level < config::kNumLevels; level++) {
